@@ -1,4 +1,5 @@
 import math
+import threading
 import usb.core
 import usb.util
 
@@ -12,13 +13,18 @@ REQ_TYPE_IN = usb.util.build_request_type(usb.util.CTRL_IN,
 CHAN_INPUT, CHAN_RETURN = range(2)
 
 class C600(object):
-  def __init__(self):
+  def __init__(self, meter_callback=None):
     self._dev = usb.core.find(idVendor=0x0763, idProduct=0x2031)
     if self._dev is None:
       raise ValueError('C600 device not found')
 
     if not self._dev.get_active_configuration():
       self._dev.set_configuration()
+
+    if meter_callback:
+      self._meter_callback = meter_callback
+      self._meter_timer = threading.Timer(0.05, self.ReadMeters)
+      self._meter_timer.start()
 
   def SetLevel(self, mixer, chan_type, chan_index, level):
     r"""Sets a mixer level.
@@ -68,3 +74,24 @@ class C600(object):
       REQ_TYPE_OUT, 0x1, value, 0x4001, level_bytes)
     if result != 2:
       raise ValueError('ctrl_transfer failed with result {}'.format(result))
+
+  def ReadMeters(self):
+    data = self._dev.ctrl_transfer(REQ_TYPE_IN, 0x3, 0x10, 0x2001, 0x32)
+    def GetLevel(p):
+      level = float((data[p + 1] << 8) + data[p]) / 0xFFFF
+      if level == 0.0:
+        log_level = 0.0
+      else:
+        log_level = math.log(level * 1000) / 6.908
+        if log_level < 0.0:
+          log_level = 0.0
+      return log_level
+    meter_levels = {}
+    for i, p in enumerate(range(0, 12, 2)):
+      meter_levels[(CHAN_INPUT, i)] = GetLevel(p)
+    for i, p in enumerate(range(12, 28, 2)):
+      meter_levels[(CHAN_RETURN, i)] = GetLevel(p)
+    self._meter_callback(meter_levels)
+
+    self._meter_timer = threading.Timer(0.1, self.ReadMeters)
+    self._meter_timer.start()
