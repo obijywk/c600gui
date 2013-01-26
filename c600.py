@@ -51,10 +51,12 @@ class C600(object):
     value += mixer << 1
 
     # TODO: implement stereo pan
-    log_level = math.log(level * 1000) / 6.908
+    if level == 0.0:
+      log_level = 0.0
+    else:
+      log_level = math.log(level * 1000) / 6.908
     scaled_level = int(0x7FFF * log_level) + 0x8000
     level_bytes = [chr(scaled_level & 0xFF), chr(scaled_level >> 8)]
-    print level_bytes
 
     result = self._dev.ctrl_transfer(
       REQ_TYPE_OUT, 0x1, value, 0x4001, level_bytes)
